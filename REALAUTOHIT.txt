@@ -1,0 +1,114 @@
+// ==UserScript==
+// @name         EvoWorld.io — AutoHit vs Reapers (no turn)
+// @namespace    https://tampermonkey.net/
+// @version      1.3
+// @description  Удар без розвороту лише по ghostlyReaper, pumpkinGhost, grimReaper. Тогл — H.
+// @author       you
+// @match        https://evoworld.io/*
+// @grant        none
+// ==/UserScript==
+
+(() => {
+  'use strict';
+
+  /* 1. Тільки ці вороги тригерять удар */
+  const TARGET_REAPERS = ['ghostlyReaper', 'pumpkinGhost', 'grimReaper'];
+
+  /* 2. Геометрія коси (для вашого героя-Reaper’а) */
+  const SCYTHE_HITBOX = {
+    ghostlyReaper: { left: 32, top: 16.5, width: 43, height: 98.5 },
+    pumpkinGhost:  { left: 43, top: 68,  width: 62, height: 150  },
+    grimReaper:    { left: 42, top: 63,  width: 52, height: 141  },
+  };
+
+  /* 3. Стани */
+  let enabled = true;
+  let hitAllowed = false;              // true, якщо хоча б один ворог-Reaper у хітбоксі
+
+  /* 4. Чекаємо клієнт гри */
+  const wait = setInterval(() => {
+    if (typeof game === 'undefined' || !game.drawObject || !game.me) return;
+    clearInterval(wait);
+    hookClient();
+    console.log('[AutoHit-reapers-no-turn] активний.');
+  }, 250);
+
+  /* 5. Під’єднання */
+  function hookClient() {
+
+    // Тогл «H»
+    window.addEventListener('keyup', e => {
+      if (e.key.toLowerCase() === 'h') enabled = !enabled;
+    });
+
+    // Патч drawObject — шукаємо ворогів-Reaper’ів у хітбоксі
+    const origDrawObject = game.drawObject;
+    game.drawObject = function (ent, ...rest) {
+      if (enabled) processEntity(ent);
+      return origDrawObject.call(this, ent, ...rest);
+    };
+
+    // Патч window.draw — робимо удар, якщо треба
+    const origDraw = window.draw;
+    window.draw = function (...args) {
+      if (enabled) autoHit();
+      hitAllowed = false;              // обнуляємо після кадру
+      return origDraw.apply(this, args);
+    };
+  }
+
+  /* 6. Перевірка окремої сутності */
+  function processEntity(ent) {
+    if (!ent || ent === game.me || ent.inHide || !ent.position) return;
+    if (!TARGET_REAPERS.includes(ent.name)) return;          // цікавлять лише ці три
+
+    const scale = { x: game.zoom * game.scaleX, y: game.zoom * game.scaleY };
+    const pos   = game.getRenderPosition(ent.position.x, ent.position.y);
+    const w = ent.width * scale.x, h = ent.height * scale.y;
+
+    // Колайдер ворога
+    const hit = {
+      left:   pos.x - w / 2 + ent.colliderRectangleOffset.left  * w,
+      right:  pos.x - w / 2 + (1 - ent.colliderRectangleOffset.right) * w,
+      top:    pos.y - h      + ent.colliderRectangleOffset.top  * h,
+      bottom: pos.y - h      + (1 - ent.colliderRectangleOffset.bottom) * h,
+    };
+
+    // Хітбокси коси (лівий і правий) — беремо з вашого поточного Reaper’а  
+    const myName  = game.me.name;
+    const scythe  = SCYTHE_HITBOX[myName];
+    if (!scythe) return;                                      // якщо ви не Reaper, пропускаємо
+
+    const mp = game.getRenderPosition(game.me.position.x, game.me.position.y);
+    const mw = game.me.width * scale.x, mh = game.me.height * scale.y;
+    const center = { x: mp.x + mw / 2, y: mp.y - mh / 2 };
+
+    const leftBox = {
+      left:  center.x - (scythe.left * scale.x + scythe.width * scale.x),
+      right: center.x -  scythe.left * scale.x,
+      top:   center.y -  scythe.top  * scale.y,
+      bottom:center.y -  scythe.top  * scale.y + scythe.height * scale.y,
+    };
+    const rightBox = {
+      left:  center.x + scythe.left * scale.x,
+      right: center.x + scythe.left * scale.x + scythe.width * scale.x,
+      top:   leftBox.top,
+      bottom:leftBox.bottom,
+    };
+
+    // Якщо ворог-Reaper у будь-якому з хітбоксів — ставимо прапор
+    if (overlap(hit, leftBox) || overlap(hit, rightBox)) hitAllowed = true;
+  }
+
+  /* 7. Автоматичний удар — без розвороту */
+  function autoHit() {
+    if (!hitAllowed) return;                     // нікого у хітбоксі
+    if (game.me.skillCooldown > 40) return;      // скіл ще не готовий
+    window.skillUse();                           // просто б’ємо
+  }
+
+  /* 8. Перетин прямокутників */
+  const overlap = (a, b) =>
+    !(a.left >= b.right || b.left >= a.right || a.top >= b.bottom || b.top >= a.bottom);
+
+})();
