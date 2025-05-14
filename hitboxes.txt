@@ -1,0 +1,749 @@
+// ==UserScript==
+// @name         HitBoxes
+// @namespace    http://tampermonkey.net/
+// @version      2
+// @description  Press H and E
+// @author       skinstonsion
+// @match        https://evoworld.io/
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=evoworld.io
+// @grant        none
+// ==/UserScript==
+(function () {
+  "use strict";
+  window.imReaper = false;
+  window.attackHitboxesOLD = {
+    ghostlyReaperScythe: {
+      topLeftX: -75,
+      topLeftY: -16.5,
+      bottomRightX: -32,
+      bottomRightY: 82,
+    },
+    pumpkinGhostScythe: {
+      topLeftX: -105,
+      topLeftY: -68,
+      bottomRightX: -43,
+      bottomRightY: 82,
+    },
+    grimReaperScythe: {
+      topLeftX: -94,
+      topLeftY: -63,
+      bottomRightX: -42,
+      bottomRightY: 78,
+    },
+  };
+  window.attackHitboxesFIX = {
+    ghostlyReaperScythe: {
+      left: 32,
+      top: 16.5,
+      width: 43,
+      height: 98.5,
+    },
+    pumpkinGhostScythe: {
+      left: 43,
+      top: 68,
+      width: 62,
+      height: 150,
+    },
+    grimReaperScythe: {
+      left: 42,
+      top: 63,
+      width: 52,
+      height: 141,
+    },
+  };
+  window.myAttackHitbox = window.attackHitboxesFIX.pumpkinGhostScythe;
+  var toggleHack = true;
+  // Variable to hold the state of 'e' key
+  var isEKeyPressed = false;
+  // Add an event listener for keydown
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "e" || event.key === "E") {
+      isEKeyPressed = true;
+    }
+  });
+  // Add an event listener for keyup
+  document.addEventListener("keyup", function (event) {
+    if (event.key === "e" || event.key === "E") {
+      isEKeyPressed = false;
+    }
+    if (event.key === "h" || event.key === "H") {
+      toggleHack = !toggleHack;
+    }
+  });
+  // Create a new canvas with the variable name "canvas3"
+  var canvas3 = document.createElement("canvas");
+  document.body.appendChild(canvas3);
+  // Set canvas size
+  canvas3.width = window.innerWidth;
+  canvas3.height = window.innerHeight;
+  // Get the 2D rendering context
+  var ctx3 = canvas3.getContext("2d");
+  // Position the new canvas on top of the game's canvas
+  canvas3.style.position = "absolute";
+  canvas3.style.top = "0";
+  canvas3.style.left = "0";
+  canvas3.style.zIndex = "100"; // Adjust the z-index to make sure it's on top
+  canvas3.style.pointerEvents = "none"; // This line allows mouse events to pass through the new canvas
+  var alreadySet = false;
+  var leftReward = 0;
+  var rightReward = 0;
+  function isPlayerInRadius(player, boxSize) {
+    if (
+      typeof game === "undefined" ||
+      typeof player === "undefined" ||
+      !game.me ||
+      imDead ||
+      !player.position ||
+      !game.me.position
+    ) {
+      return false;
+    }
+    // Calculate the box boundaries
+    var leftBoundary = game.me.position.x - boxSize / 2;
+    var rightBoundary = game.me.position.x + boxSize / 2;
+    var topBoundary = game.me.position.y - boxSize / 2;
+    var bottomBoundary = game.me.position.y + boxSize / 2;
+    // Check if the player's position is within the box
+    if (
+      player.position.x >= leftBoundary &&
+      player.position.x <= rightBoundary &&
+      player.position.y >= topBoundary &&
+      player.position.y <= bottomBoundary
+    ) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+  function checkAttacks(entity, attackHitbox) {
+    if (
+      typeof game === "undefined" ||
+      typeof entity === "undefined" ||
+      !game.me ||
+      imDead ||
+      !entity.position ||
+      !game.me.position
+    ) {
+      return false;
+    }
+    // decide which direction the entity is
+    var isInRight = game.me.position.x > entity.position.x;
+    // calculate the position accordingly
+    var left = isInRight
+      ? game.me.position.x + attackHitbox.left
+      : game.me.position.x - (attackHitbox.left + attackHitbox.width);
+    var myScytheHitbox = {
+      left: left,
+      top: game.me.position.y + attackHitbox.top,
+      width: attackHitbox.width,
+      height: attackHitbox.height,
+    };
+    // let playerCollisionHitbox: RectAllSides = {
+    //   left: centerPos.x - entity.colliderRectangleOffset.left * entity.width,s
+    //   right: centerPos.x + entity.colliderRectangleOffset.right * entity.width,
+    //   top: centerPos.y + entity.colliderRectangleOffset.top * entity.height,
+    //   bottom:
+    //     centerPos.y - entity.colliderRectangleOffset.bottom * entity.height,
+    // };
+    return {
+      // collides: doesRectsOverlap(
+      //   rectToAllSides(myScytheHitbox),
+      //   playerCollisionHitbox
+      // ),
+      collides: isInBox(entity.position, myScytheHitbox),
+      direction: isInRight ? 1 : -1,
+    };
+  }
+  function drawBoxAroundMe(firstBoxSize) {
+    if (typeof game === "undefined" || !game.me) {
+      // If game or game.me is undefined, do not proceed
+      return;
+    }
+    // Calculate the center of the canvas
+    var centerX = canvas3.width / 2;
+    var centerY = canvas3.height / 2;
+    var boxSize = firstBoxSize * game.zoom;
+    // Calculate the box boundaries
+    var leftBoundary = centerX - boxSize / 2;
+    var topBoundary = centerY - boxSize / 2;
+    // Draw the box
+    if (ctx3) {
+      ctx3.beginPath();
+      ctx3.rect(leftBoundary, topBoundary, boxSize, boxSize);
+      ctx3.lineWidth = 1;
+      ctx3.strokeStyle = "grey"; // Change the color as needed
+      ctx3.stroke();
+    }
+  }
+  function drawAttackHitbox(attackHitbox, canKillLeft, canKillRight) {
+    if (!toggleHack) {
+      return;
+    }
+    var hitboxWidth = attackHitbox.width * game.zoom;
+    var hitboxHeight = attackHitbox.height * game.zoom;
+    var screenCenterPos = {
+      x: canvas3.width / 2,
+      y: canvas3.height / 2,
+    };
+    var left = screenCenterPos.x + attackHitbox.left;
+    var leftOppositeDirection =
+      screenCenterPos.x - (attackHitbox.left + attackHitbox.width);
+    // when drawing y=0 - is top so flipped from + to - change
+    var top = screenCenterPos.y - attackHitbox.top;
+    console.log(screenCenterPos, attackHitbox);
+    if (ctx3) {
+      if (canKillLeft) {
+        ctx3.fillStyle = "rgba(255, 0, 0, 0.3)"; // Change the color as needed
+        ctx3.fillRect(leftOppositeDirection, top, hitboxWidth, hitboxHeight);
+      }
+      if (canKillRight) {
+        ctx3.fillStyle = "rgba(255, 0, 0, 0.3)"; // Change the color as needed
+        ctx3.fillRect(left, top, hitboxWidth, hitboxHeight);
+      }
+      // Draw the hitbox rectangle outline
+      ctx3.lineWidth = 2;
+      ctx3.strokeStyle = "red";
+      ctx3.strokeRect(left, top, hitboxWidth, hitboxHeight);
+      ctx3.strokeRect(leftOppositeDirection, top, hitboxWidth, hitboxHeight);
+    }
+  }
+  // const drawScytheHitboxOLD = function (
+  //   x,
+  //   y,
+  //   height,
+  //   width,
+  //   attackHitbox,
+  //   direction
+  // ) {
+  //   const pos = game.getRenderPosition(x, y);
+  //   // Calculate the width and height of the hitbox based on the top left and bottom right positions
+  //   let hitboxWidth =
+  //     (attackHitbox.bottomRightX - attackHitbox.topLeftX) *
+  //     direction *
+  //     game.zoom;
+  //   let hitboxHeight =
+  //     (attackHitbox.bottomRightY - attackHitbox.topLeftY) * game.zoom;
+  //   // Calculate the top left position of the hitbox relative to the player's center
+  //   let hitboxTopLeftX =
+  //     pos.x +
+  //     (width * game.scaleX * game.zoom) / 2 +
+  //     attackHitbox.topLeftX * direction * game.zoom;
+  //   let hitboxTopLeftY =
+  //     pos.y -
+  //     (height * game.scaleY * game.zoom) / 2 +
+  //     attackHitbox.topLeftY * game.zoom;
+  //   // Set the hitbox color
+  //   game.dynamicContext.lineWidth = 2;
+  //   game.dynamicContext.strokeStyle = "red";
+  //   // Draw the hitbox rectangle outline
+  //   game.dynamicContext.strokeRect(
+  //     hitboxTopLeftX,
+  //     hitboxTopLeftY,
+  //     hitboxWidth,
+  //     hitboxHeight
+  //   );
+  // };
+  var drawHitboxrfff = function (entity, attackHitbox) {
+    if (
+      typeof game === "undefined" ||
+      typeof entity === "undefined" ||
+      imDead ||
+      !entity.position
+    ) {
+      return false;
+    }
+    var colliderRectangleOffset = entity.colliderRectangleOffset;
+    var pos = game.getRenderPosition(entity.position.x, entity.position.y);
+    var left =
+      (entity.direction > 0
+        ? pos.x + attackHitbox.left
+        : pos.x - (attackHitbox.left + attackHitbox.width)) *
+      game.zoom *
+      game.scaleX;
+    // Calculate the hitbox dimensions
+    var hitboxLeft =
+      pos.x -
+      (entity.width * game.scaleX * game.zoom) / 2 +
+      (entity.width / 2) * game.zoom * game.scaleX;
+    var hitboxTop =
+      pos.y -
+      entity.height * game.scaleY * game.zoom -
+      (entity.height * game.scaleY * game.zoom) / 2 +
+      colliderRectangleOffset.top * entity.height * game.scaleY * game.zoom +
+      (entity.height / 2) * game.zoom * game.scaleY;
+    var hitboxWidth =
+      entity.width *
+      game.scaleX *
+      game.zoom *
+      (1 - colliderRectangleOffset.right - colliderRectangleOffset.left);
+    var hitboxHeight =
+      entity.height *
+      game.scaleY *
+      game.zoom *
+      (1 - colliderRectangleOffset.top - colliderRectangleOffset.bottom);
+    // Draw the hitbox
+    game.dynamicContext.lineWidth = 2;
+    game.dynamicContext.strokeStyle = "black"; // black outline for hitbox
+    game.dynamicContext.strokeRect(
+      hitboxLeft,
+      hitboxTop,
+      hitboxWidth,
+      hitboxHeight
+    );
+  };
+  var drawScytheHitbox = function (entity, attackHitbox, isMe) {
+    if (isMe === void 0) {
+      isMe = false;
+    }
+    if (
+      typeof game === "undefined" ||
+      typeof entity === "undefined" ||
+      !game.me ||
+      !entity.position ||
+      !game.me.position
+    ) {
+      return;
+    }
+    var pos = game.getRenderPosition(entity.position.x, entity.position.y);
+    // invert Y
+    var hitboxWidth = attackHitbox.width * game.zoom * game.scaleX;
+    var hitboxHeight = attackHitbox.height * game.zoom * game.scaleY;
+    var entityWidth = entity.width * game.zoom * game.scaleX;
+    var entityHeight = entity.height * game.zoom * game.scaleY;
+    var centerPos = {
+      y: pos.y - entityHeight / 2,
+      x: pos.x + entityWidth / 2,
+    };
+    var leftRight = centerPos.x + attackHitbox.left * game.zoom * game.scaleX;
+    var leftLeft =
+      centerPos.x - (attackHitbox.left * game.zoom * game.scaleX + hitboxWidth);
+    var left = entity.direction > 0 ? leftRight : leftLeft;
+    // again for rendering flipped y
+    var top = centerPos.y - attackHitbox.top * game.zoom * game.scaleY;
+    game.dynamicContext.lineWidth = 2;
+    game.dynamicContext.strokeStyle = "red";
+    if (isMe) {
+      // both sides
+      game.dynamicContext.strokeRect(leftLeft, top, hitboxWidth, hitboxHeight);
+      game.dynamicContext.strokeRect(leftRight, top, hitboxWidth, hitboxHeight);
+    } else {
+      // Draw the hitbox rectangle outline
+      game.dynamicContext.strokeRect(left, top, hitboxWidth, hitboxHeight);
+    }
+    // // Define the width and height of the rectangles
+    // let rectWidth = 80; // Change this to your desired width
+    // let rectHeight = 80; // Change this to your desired height
+    // Draw the rectangle at the center position
+    // game.dynamicContext.strokeRect(
+    //   centerPos.x - rectWidth / 2,
+    //   centerPos.y - rectHeight / 2,
+    //   rectWidth,
+    //   rectHeight
+    // );
+  };
+  var checkScytheAttacks = function (playerCollider, attackHitbox) {
+    if (typeof game === "undefined" || !game.me || !game.me.position) {
+      return;
+    }
+    var pos = game.getRenderPosition(game.me.position.x, game.me.position.y);
+    // invert Y
+    var hitboxWidth = attackHitbox.width * game.zoom * game.scaleX;
+    var hitboxHeight = attackHitbox.height * game.zoom * game.scaleY;
+    var myWidth = game.me.width * game.zoom * game.scaleX;
+    var myHeight = game.me.height * game.zoom * game.scaleY;
+    var centerPos = {
+      y: pos.y - myHeight / 2,
+      x: pos.x + myWidth / 2,
+    };
+    var leftRight = centerPos.x + attackHitbox.left * game.zoom * game.scaleX;
+    var leftLeft =
+      centerPos.x - (attackHitbox.left * game.zoom * game.scaleX + hitboxWidth);
+    // again for rendering flipped y
+    var top = centerPos.y - attackHitbox.top * game.zoom * game.scaleY;
+    // calculate if in radius
+    // do full recalculation - check if i can hit it
+    // during checking take into account other entities from the set
+    // if those entities dead or far away or just not needed - remove
+    var leftAttackHT = {
+      top: top,
+      left: leftLeft,
+      right: leftLeft + hitboxWidth,
+      bottom: top + hitboxHeight, // because rendered coords using flipped
+    };
+    var rightAttackHT = {
+      top: top,
+      left: leftRight,
+      right: leftRight + hitboxWidth,
+      bottom: top + hitboxHeight, // because rendered coords using flipped
+    };
+    // console.log("converted: ", rightAttackHT, leftAttackHT);
+    var canHitLeft = doesRectsOverlap(leftAttackHT, playerCollider);
+    var canHitRight = doesRectsOverlap(rightAttackHT, playerCollider);
+    if (canHitLeft || canHitRight) {
+      console.log("collides attack");
+    }
+    game.dynamicContext.lineWidth = 2;
+    game.dynamicContext.strokeStyle = "red";
+    // Fill the rectangles if they can be hit
+    if (canHitLeft) {
+      game.dynamicContext.fillStyle = "rgba(255, 0, 0, 0.5)";
+      game.dynamicContext.fillRect(leftLeft, top, hitboxWidth, hitboxHeight);
+    }
+    if (canHitRight) {
+      game.dynamicContext.fillStyle = "rgba(255, 0, 0, 0.5)";
+      game.dynamicContext.fillRect(leftRight, top, hitboxWidth, hitboxHeight);
+    }
+    return { canHitLeft: canHitLeft, canHitRight: canHitRight };
+  };
+  var processEntity = function (entity) {
+    if (
+      typeof game === "undefined" ||
+      typeof entity === "undefined" ||
+      !entity.position
+    ) {
+      return false;
+    }
+    var isMe = entity == game.me;
+    var pos = game.getRenderPosition(entity.position.x, entity.position.y);
+    var scaler = {
+      x: game.zoom * game.scaleX,
+      y: game.zoom * game.scaleY,
+    };
+    // Calculate the hitbox dimensions
+    var hitboxLeft =
+      pos.x -
+      (entity.width * scaler.x) / 2 +
+      entity.colliderRectangleOffset.left * entity.width * scaler.x +
+      (entity.width / 2) * scaler.x;
+    var hitboxTop =
+      pos.y -
+      entity.height * scaler.y -
+      (entity.height * scaler.y) / 2 +
+      entity.colliderRectangleOffset.top * entity.height * scaler.y +
+      (entity.height / 2) * scaler.y;
+    var hitboxWidth =
+      entity.width *
+      scaler.x *
+      (1 -
+        entity.colliderRectangleOffset.right -
+        entity.colliderRectangleOffset.left);
+    var hitboxHeight =
+      entity.height *
+      scaler.y *
+      (1 -
+        entity.colliderRectangleOffset.top -
+        entity.colliderRectangleOffset.bottom);
+    var playerCollider = {
+      top: hitboxTop,
+      left: hitboxLeft,
+      right: hitboxLeft + hitboxWidth,
+      bottom: hitboxTop + hitboxHeight, // because rendered coords using flipped
+    };
+    var attackHitbox;
+    switch (entity.name) {
+      case "ghostlyReaper":
+        attackHitbox = window.attackHitboxesFIX.ghostlyReaperScythe;
+        break;
+      case "pumpkinGhost":
+        attackHitbox = window.attackHitboxesFIX.pumpkinGhostScythe;
+        break;
+      case "grimReaper":
+        attackHitbox = window.attackHitboxesFIX.grimReaperScythe;
+        break;
+    }
+    if (attackHitbox && isMe) {
+      window.imReaper = true;
+    }
+    // if (!attackHitbox && isMe) {
+    //   // this draws the kill hitbox even if not reaper
+    //   attackHitbox = window.attackHitboxesFIX.pumpkinGhostScythe;
+    // }
+    if (attackHitbox) {
+      if (isMe) {
+        window.myAttackHitbox = attackHitbox;
+      }
+      if (attackHitbox) {
+        drawScytheHitbox(entity, attackHitbox, isMe);
+      }
+      // if (isPlayerInRadius(entity, 500)) {
+      // calculate if in radius
+      // do full recalculation - check if i can hit it
+      // during checking take into account other entities from the set
+      // if those entities dead or far away or just not needed - remove
+      // console.log("checking: ", playerCollider, window.myAttackHitbox);
+      if (!isMe) {
+        var _a = checkScytheAttacks(playerCollider, window.myAttackHitbox),
+          canHitLeft = _a.canHitLeft,
+          canHitRight = _a.canHitRight;
+        var reward = 0;
+        if (entity.type == objectType.FOOD && game.me.hp < 100) {
+          // if im not full hp - food 1 point
+          reward = 1;
+        } else if (
+          entity.name == "ghostlyReaper" ||
+          entity.name == "pumpkinGhost" ||
+          entity.name == "grimReaper"
+        ) {
+          // scythe - 50 point
+          reward = 50;
+          if (entity.hp < 25) {
+            // 100 if lower than 25 hp
+            // because can one hit
+            reward = 100;
+          }
+        } else if (entity.type == objectType.PLAYER) {
+          // player - 2 point
+          reward = 2;
+          if (entity.hp < 25) {
+            // 4 if lower than 25 hp
+            // because can one hit
+            reward = 4;
+          }
+        }
+        if (canHitLeft) {
+          leftReward += reward;
+        }
+        if (canHitRight) {
+          rightReward += reward;
+        }
+      }
+    }
+    // }
+    // Draw the hitbox
+    game.dynamicContext.lineWidth = 2;
+    game.dynamicContext.strokeStyle = "black"; // black outline for hitbox
+    game.dynamicContext.strokeRect(
+      hitboxLeft,
+      hitboxTop,
+      hitboxWidth,
+      hitboxHeight
+    );
+  };
+  var drawCollisionwithCTX = function (entity) {
+    if (
+      typeof game === "undefined" ||
+      typeof entity === "undefined" ||
+      !entity.position
+    ) {
+      return false;
+    }
+    var isMe = entity == game.me;
+    var attackHitbox;
+    if (!isMe) {
+      switch (entity.name) {
+        case "ghostlyReaper":
+          attackHitbox = window.attackHitboxesFIX.ghostlyReaperScythe;
+          break;
+        case "pumpkinGhost":
+          attackHitbox = window.attackHitboxesFIX.pumpkinGhostScythe;
+          break;
+        case "grimReaper":
+          attackHitbox = window.attackHitboxesFIX.grimReaperScythe;
+          break;
+      }
+    }
+    var pos = game.getRenderPosition(entity.position.x, entity.position.y);
+    var scaler = {
+      x: game.zoom * game.scaleX,
+      y: game.zoom * game.scaleY,
+    };
+    // Calculate the hitbox dimensions
+    var hitboxLeft =
+      pos.x -
+      (entity.width * scaler.x) / 2 +
+      entity.colliderRectangleOffset.left * entity.width * scaler.x +
+      (entity.width / 2) * scaler.x;
+    var hitboxTop =
+      pos.y -
+      entity.height * scaler.y -
+      (entity.height * scaler.y) / 2 +
+      entity.colliderRectangleOffset.top * entity.height * scaler.y +
+      (entity.height / 2) * scaler.y;
+    var hitboxWidth =
+      entity.width *
+      scaler.x *
+      (1 -
+        entity.colliderRectangleOffset.right -
+        entity.colliderRectangleOffset.left);
+    var hitboxHeight =
+      entity.height *
+      scaler.y *
+      (1 -
+        entity.colliderRectangleOffset.top -
+        entity.colliderRectangleOffset.bottom);
+    // Draw the hitbox
+    ctx3.lineWidth = 2;
+    ctx3.strokeStyle = "black"; // black outline for hitbox
+    ctx3.strokeRect(hitboxLeft, hitboxTop, hitboxWidth, hitboxHeight);
+  };
+  function isInBox(pos, box) {
+    if (
+      pos.x >= box.left &&
+      pos.x <= box.left + box.width &&
+      pos.y >= box.top &&
+      pos.y <= box.top - box.height
+    ) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+  function rectToAllSides(rect) {
+    return {
+      left: rect.left,
+      top: rect.top,
+      bottom: rect.top - rect.height,
+      right: rect.left + rect.width,
+    };
+  }
+  window.attackScythe = function () {
+    // if i have no delay:
+    //! fix the delay part - game.me.skillCooldown < 40
+    //! ABSOLUTELY BROKEN
+    // if (!window.imReaper) return;
+    // if (leftReward > 0 || rightReward > 0) {
+    //   let oldDirection = game.me.flySide;
+    //   let direction: -1 | 1;
+    //   if (leftReward > rightReward) {
+    //     direction = -1;
+    //   } else {
+    //     direction = 1;
+    //   }
+    //   // change directions
+    //   let wasntSame = game.me.flySide != direction;
+    //   if (wasntSame) {
+    //     game.me.flySide = direction;
+    //     gameServer.emit(socketMsgType.FLY, direction);
+    //   }
+    //   // simulate the hit
+    //   window.skillUse();
+    //   if (wasntSame) {
+    //     game.me.flySide = oldDirection;
+    //     gameServer.emit(socketMsgType.FLY, oldDirection);
+    //   }
+    // } else {
+    //   //window.skillStop();
+    // }
+  };
+  function doesRectsOverlap(rect1, rect2) {
+    //! bottom and top are flipped because these rects are in Canvas website mode
+    //! where y increases downward
+    // if rectangle has area 0, no overlap
+    if (
+      rect1.left == rect1.right ||
+      rect1.top == rect1.bottom ||
+      rect1.left == rect1.right ||
+      rect2.top == rect2.bottom
+    )
+      return false;
+    // If one rectangle is on left side of other
+    if (rect1.left >= rect2.right || rect2.left >= rect1.right) {
+      return false;
+    }
+    // If one rectangle is above other
+    if (rect1.top >= rect2.bottom || rect2.top >= rect1.bottom) {
+      return false;
+    }
+    return true;
+  }
+  setInterval(function () {
+    if (typeof game === "undefined" || typeof gameServer === "undefined") {
+      return;
+    }
+    if (
+      !wasSocketInit ||
+      !joinedGame ||
+      !game.me ||
+      !gameZoom ||
+      !game.me.width
+    ) {
+      return;
+    }
+    if (!alreadySet && !imDead) {
+      var originaldrawFunc_1 = window.draw;
+      window.draw = function () {
+        // this is the draw func
+        // do the checking here
+        window.attackScythe();
+        // reset rewards
+        leftReward = 0;
+        rightReward = 0;
+        originaldrawFunc_1.apply(this);
+      };
+      var originaldrawObject_1 = game.drawObject;
+      game.drawObject = function (entity, boolSomething) {
+        if (toggleHack && entity.position) {
+          if (
+            (entity.type == objectType.PLAYER ||
+              (entity.type == objectType.FOOD && entity.hasSoul) ||
+              entity.type == objectType.BOSS) &&
+            // not in hide
+            !entity.inHide
+          ) {
+            // console.log(entity.name, entity);
+            processEntity(entity);
+          }
+        }
+        originaldrawObject_1.apply(this, [entity, boolSomething]);
+      };
+      alreadySet = true;
+    }
+    // Clear the canvas
+    ctx3 === null || ctx3 === void 0
+      ? void 0
+      : ctx3.clearRect(0, 0, canvas3.width, canvas3.height);
+    if (!toggleHack) {
+      return;
+    }
+    // update canvas size
+    canvas3.width = window.innerWidth;
+    canvas3.height = window.innerHeight;
+    // Calculate the center of the canvas
+    // drawBoxAroundMe(500);
+    var name = game.me.name;
+    name = "pumpkinGhost";
+    // To iterate over the Map only if im reaper
+    if (
+      name == "ghostlyReaper" ||
+      name == "pumpkinGhost" ||
+      name == "grimReaper"
+    ) {
+      var myAttackHitbox = void 0;
+      switch (name) {
+        case "ghostlyReaper":
+          myAttackHitbox = window.attackHitboxesFIX.ghostlyReaperScythe;
+          break;
+        case "pumpkinGhost":
+          myAttackHitbox = window.attackHitboxesFIX.pumpkinGhostScythe;
+          break;
+        case "grimReaper":
+          myAttackHitbox = window.attackHitboxesFIX.grimReaperScythe;
+          break;
+      }
+      var canKillLeft = false;
+      var maxRewardLeft = 0;
+      var canKillRight = false;
+      var maxRewardRight = 0;
+      // killMap.forEach(function (entity, id) {
+      //   if (!isPlayerInRadius(entity, 400)) {
+      //     killMap.delete(id);
+      //   } else {
+      //     console.log(entity.name);
+      //     drawCollisionwithCTX(entity);
+      //     // check for stuff
+      //     let result = checkAttacks(entity, myAttackHitbox);
+      //     console.log(result);
+      //     if (result && result.collides)
+      //       result.direction > 1 ? (canKillRight = true) : (canKillLeft = true);
+      //   }
+      // });
+      // draw my hitbox now
+      // drawAttackHitbox(myAttackHitbox, canKillLeft, canKillRight);
+    }
+  }, 12);
+  setInterval(function () {
+    if (isEKeyPressed && !imDead && gameServer && game.me) {
+      gameServer.emit(socketMsgType.BOOST);
+    }
+  }, 12);
+})();
