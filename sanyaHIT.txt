@@ -1,0 +1,250 @@
+// ==UserScript==
+// @name         EvoWorld.io — AutoHit + Modern Login Table + HWID + AutoUpdate
+// @namespace    https://tampermonkey.net/
+// @version      5.0
+// @description  Удар по ghostlyReaper, pumpkinGhost, grimReaper. Додає сучасну пересувну табличку для введення логіна і пароля, блокує автохіт до правильного вводу, генерує унікальний HWID для кожного пристрою, перевіряє HWID на заблоковані та підтримує автооновлення. Логін і пароль автоматично зчитуються з файлу passwordautohit.txt.
+// @author       KTM
+// @match        https://evoworld.io/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_download
+// @connect      raw.githubusercontent.com
+// @connect      api.ipify.org
+// ==/UserScript==
+
+(() => {
+  'use strict';
+
+  const TARGET_REAPERS = ['ghostlyReaper', 'pumpkinGhost', 'grimReaper'];
+
+  const SCYTHE_HITBOX = {
+    ghostlyReaper: { left: 10, top: 5, width: 15, height: 50 },
+    pumpkinGhost: { left: 15, top: 20, width: -15, height: 60 },
+    grimReaper: { left: 42, top: 63, width: -35, height: 141 }
+  };
+
+  let enabled = false; // Автохіт заблоковано спочатку
+  let hitAllowed = false;
+  const validCredentials = ['simplethegoat', 'ktmhitbest']; // Логін і пароль з файлу
+
+  // Генерація унікального HWID для пристрою
+  function generateHWID() {
+    const fingerprint = `${navigator.userAgent}-${navigator.platform}-${Date.now()}`;
+    return btoa(fingerprint).slice(0, 16); // Генеруємо короткий HWID
+  }
+
+  const hwid = generateHWID();
+  console.log('HWID для цього пристрою:', hwid);
+
+  // Перевірка HWID на заблоковані
+  function checkHWIDBlocked() {
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: 'https://raw.githubusercontent.com/ktmgod100/autohit/main/blocked_hwid.txt',
+      onload: function (response) {
+        if (response.status === 200) {
+          const blockedHWIDs = response.responseText.trim().split('\n').map(item => item.trim());
+          if (blockedHWIDs.includes(hwid)) {
+            alert('Ваш HWID заблоковано адміністратором. Автохіт припинено.');
+            enabled = false; // Заблокувати автохіт
+          } else {
+            console.log('HWID не заблоковано. Продовжуємо роботу.');
+          }
+        } else {
+          console.error("Не вдалося завантажити список заблокованих HWID:", response.status);
+        }
+      },
+      onerror: function () {
+        console.error("Помилка під час перевірки HWID.");
+      },
+    });
+  }
+
+  // Додати сучасну пересувну табличку для введення логіна і пароля
+  function addLoginInputTable() {
+    const ui = document.createElement('div');
+    ui.id = 'login-input-table';
+    ui.style.position = 'fixed';
+    ui.style.top = '20px';
+    ui.style.left = '20px';
+    ui.style.zIndex = '10000';
+    ui.style.backgroundColor = '#ffffff';
+    ui.style.color = '#333';
+    ui.style.padding = '20px';
+    ui.style.border = '1px solid #ddd';
+    ui.style.borderRadius = '10px';
+    ui.style.cursor = 'move';
+    ui.style.fontFamily = 'Arial, sans-serif';
+    ui.style.boxShadow = '0 4px 10px rgba(0, 0, 0, 0.2)';
+    ui.style.transition = 'box-shadow 0.3s ease';
+    ui.onmouseenter = () => (ui.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.3)');
+    ui.onmouseleave = () => (ui.style.boxShadow = '0 4px 10px rgba(0, 0, 0, 0.2)');
+
+    ui.innerHTML = `
+      <h3 style="margin-top: 0; font-size: 18px; text-align: center; color: #007BFF;">Вхід до системи</h3>
+      <label for="login" style="display:block; margin-bottom:5px; font-weight: bold;">Логін:</label>
+      <input type="text" id="login" style="width:100%; margin-bottom:10px; padding:10px; border-radius:5px; border:1px solid #ddd; font-size:14px;">
+      <label for="password" style="display:block; margin-bottom:5px; font-weight: bold;">Пароль:</label>
+      <input type="password" id="password" style="width:100%; margin-bottom:10px; padding:10px; border-radius:5px; border:1px solid #ddd; font-size:14px;">
+      <button id="submit-login" style="width:100%; padding:10px; background-color:#007BFF; color:white; border:none; border-radius:5px; font-size:14px; cursor:pointer; font-weight: bold; transition: background-color 0.3s ease;">
+        Ввійти
+      </button>
+      <br>
+      <div style="margin-top:10px; font-size:12px; color:#666; text-align:center;">
+        Ваш HWID: <span id="hwid-display" style="font-weight: bold; color: #007BFF;">${hwid}</span>
+      </div>
+    `;
+    document.body.appendChild(ui);
+
+    let isDragging = false;
+    let offsetX = 0, offsetY = 0;
+
+    ui.addEventListener('mousedown', (e) => {
+      if (e.target.id === 'submit-login' || e.target.tagName === 'INPUT') return; // Не перетягуємо, якщо клікаємо на кнопку або поле вводу
+      isDragging = true;
+      offsetX = e.clientX - ui.getBoundingClientRect().left;
+      offsetY = e.clientY - ui.getBoundingClientRect().top;
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        ui.style.left = `${e.clientX - offsetX}px`;
+        ui.style.top = `${e.clientY - offsetY}px`;
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    // Обробка введення логіна і пароля
+    document.getElementById('submit-login').addEventListener('click', () => {
+      const login = document.getElementById('login').value.trim();
+      const password = document.getElementById('password').value.trim();
+
+      console.log('Введений логін:', login);
+      console.log('Введений пароль:', password);
+
+      if (login === validCredentials[0] && password === validCredentials[1]) {
+        enabled = true; // Успішний ввід розблоковує автохіт
+        alert(`Успішний вхід! Автохіт активовано.\nВаш HWID: ${hwid}`);
+        ui.remove(); // Видаляємо табличку після успішного вводу
+      } else {
+        alert('Невірний логін або пароль. Спробуйте ще раз.');
+      }
+    });
+  }
+
+  // Функція для отримання та збереження IP-адреси
+  function getAndSaveIP() {
+    GM_xmlhttpRequest({
+      method: "GET",
+      url: "https://api.ipify.org?format=json",
+      onload: function (response) {
+        if (response.status === 200) {
+          const ipData = JSON.parse(response.responseText);
+          const ip = ipData.ip;
+
+          saveIPToFile(ip);
+        } else {
+          console.error("Не вдалося отримати IP:", response.status);
+        }
+      },
+      onerror: function () {
+        console.error("Помилка запиту до сервісу IP.");
+      }
+    });
+  }
+
+  // Збереження IP-адреси у файл
+  function saveIPToFile(ip) {
+    const fileName = "my_ip.txt";
+    const fileContent = `Ваш IP: ${ip}\nДата: ${new Date().toLocaleString()}\nHWID: ${hwid}`;
+
+    GM_download({
+      url: `data:text/plain;charset=utf-8,${encodeURIComponent(fileContent)}`,
+      name: fileName,
+    });
+  }
+
+  // Ініціалізація функцій
+  const wait = setInterval(() => {
+    if (typeof game === 'undefined' || !game.drawObject || !game.me) return;
+    clearInterval(wait);
+    hookClient();
+    addLoginInputTable();
+    checkHWIDBlocked(); // Перевірка HWID
+    getAndSaveIP();
+    console.log('[AutoHit-reapers] активний (з HWID і автооновленням).');
+  }, 250);
+
+  function hookClient() {
+    window.addEventListener('keyup', e => {
+      if (e.key.toLowerCase() === 'h') enabled = !enabled;
+    });
+
+    const origDrawObject = game.drawObject;
+    game.drawObject = function (ent, ...rest) {
+      if (enabled) processEntity(ent);
+      return origDrawObject.call(this, ent, ...rest);
+    };
+
+    const origDraw = window.draw;
+    window.draw = function (...args) {
+      if (enabled) autoHit();
+      hitAllowed = false;
+      return origDraw.apply(this, args);
+    };
+  }
+
+  function processEntity(ent) {
+    if (!ent || ent === game.me || ent.inHide || !ent.position) return;
+    if (!TARGET_REAPERS.includes(ent.name)) return;
+
+    const scale = { x: game.zoom * game.scaleX, y: game.zoom * game.scaleY };
+    const pos = game.getRenderPosition(ent.position.x, ent.position.y);
+    const w = ent.width * scale.x, h = ent.height * scale.y;
+
+    const hit = {
+      left: pos.x - w / 2 + ent.colliderRectangleOffset.left * w,
+      right: pos.x - w / 2 + (1 - ent.colliderRectangleOffset.right) * w,
+      top: pos.y - h + ent.colliderRectangleOffset.top * h,
+      bottom: pos.y - h + (1 - ent.colliderRectangleOffset.bottom) * h,
+    };
+
+    const myName = game.me.name;
+    const scythe = SCYTHE_HITBOX[myName];
+    if (!scythe) return;
+
+    const mp = game.getRenderPosition(game.me.position.x, game.me.position.y);
+    const mw = game.me.width * scale.x, mh = game.me.height * scale.y;
+    const center = { x: mp.x + mw / 2, y: mp.y - mh / 2 };
+
+    const leftBox = {
+      left: center.x - (scythe.left * scale.x + scythe.width * scale.x),
+      right: center.x - scythe.left * scale.x,
+      top: center.y - scythe.top * scale.y,
+      bottom: center.y - scythe.top * scale.y + scythe.height * scale.y,
+    };
+    const rightBox = {
+      left: center.x + scythe.left * scale.x,
+      right: center.x + scythe.left * scale.x + scythe.width * scale.x,
+      top: leftBox.top,
+      bottom: leftBox.bottom,
+    };
+
+    if (overlap(hit, leftBox) || overlap(hit, rightBox)) hitAllowed = true;
+  }
+
+  function autoHit() {
+    if (!hitAllowed) return;
+    if (game.me.skillCooldown > 40) return;
+
+    if (hitAllowed) {
+      console.log('Удар виконано');
+      window.skillUse();
+    }
+  }
+
+  const overlap = (a, b) =>
+    !(a.left >= b.right || b.left >= a.right || a.top >= b.bottom || b.top >= a.bottom);
+})();
