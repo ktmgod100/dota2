@@ -1,0 +1,233 @@
+// ==UserScript==
+// @name         EvoWorld.io — AutoHit
+// @namespace    https://tampermonkey.net/
+// @version      5.1
+// @description  KTM Private Hack
+// @author       KTM
+// @match        https://evoworld.io/*
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
+// ==/UserScript==
+
+(() => {
+  'use strict';
+
+  // === AUTOHIT CORE ===
+  const TARGET_REAPERS = ['ghostlyReaper', 'pumpkinGhost', 'grimReaper'];
+  const SCYTHE_HITBOX = {
+    ghostlyReaper: { left: 10, top: 5, width: 15, height: 50 },
+    pumpkinGhost: { left: 15, top: 20, width: -15, height: 60 },
+    grimReaper: { left: 42, top: 63, width: -35, height: 141 }
+  };
+  let enabled = false;
+  let hitAllowed = false;
+
+  // === HWID GEN ===
+  function generateHWID() {
+    const fingerprint = `${navigator.userAgent}-${navigator.platform}-${Date.now()}`;
+    return btoa(fingerprint).slice(0, 16);
+  }
+  const hwid = generateHWID();
+
+  // === SHA-256 HELPERS ===
+  async function sha256Hex(str) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // === REMOTE HASH FETCH ===
+  let validHashes = ["", ""]; // [loginHash, passwordHash]
+  function fetchCredentialHashes(callback) {
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: 'https://raw.githubusercontent.com/ktmgod100/dota2/main/passwordautohit.txt',
+      onload: function (response) {
+        if (response.status === 200) {
+          const lines = response.responseText.trim().split('\n');
+          if (lines.length >= 2) {
+            validHashes = [lines[0].trim(), lines[1].trim()];
+          }
+        }
+        if (typeof callback === 'function') callback();
+      },
+      onerror: function () {
+        if (typeof callback === 'function') callback();
+      }
+    });
+  }
+
+  // === HWID BLOCK CHECK ===
+  function checkHWIDBlocked() {
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: 'https://raw.githubusercontent.com/ktmgod100/autohit/main/blocked_hwid.txt',
+      onload: function (response) {
+        if (response.status === 200) {
+          const blockedHWIDs = response.responseText.trim().split('\n').map(item => item.trim());
+          if (blockedHWIDs.includes(hwid)) {
+            alert('Your HWID is blocked by the administrator. AutoHit stopped.');
+            enabled = false;
+          }
+        }
+      }
+    });
+  }
+
+  // === LOGIN UI (ENGLISH, MODERN, DRAGGABLE) ===
+  function addLoginInputTable() {
+    const ui = document.createElement('div');
+    ui.id = 'login-input-table';
+    ui.style.position = 'fixed';
+    ui.style.top = '20px';
+    ui.style.left = '20px';
+    ui.style.zIndex = '10000';
+    ui.style.backgroundColor = '#ffffff';
+    ui.style.color = '#333';
+    ui.style.padding = '20px';
+    ui.style.border = '1px solid #ddd';
+    ui.style.borderRadius = '10px';
+    ui.style.cursor = 'move';
+    ui.style.fontFamily = 'Arial, sans-serif';
+    ui.style.boxShadow = '0 4px 10px rgba(0, 0, 0, 0.2)';
+    ui.style.transition = 'box-shadow 0.3s ease';
+    ui.onmouseenter = () => (ui.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.3)');
+    ui.onmouseleave = () => (ui.style.boxShadow = '0 4px 10px rgba(0, 0, 0, 0.2)');
+
+    ui.innerHTML = `
+      <h3 style="margin-top: 0; font-size: 18px; text-align: center; color: #007BFF;">System Login</h3>
+      <label for="login" style="display:block; margin-bottom:5px; font-weight: bold;">Username:</label>
+      <input type="text" id="login" style="width:100%; margin-bottom:10px; padding:10px; border-radius:5px; border:1px solid #ddd; font-size:14px;">
+      <label for="password" style="display:block; margin-bottom:5px; font-weight: bold;">Password:</label>
+      <input type="password" id="password" style="width:100%; margin-bottom:10px; padding:10px; border-radius:5px; border:1px solid #ddd; font-size:14px;">
+      <button id="submit-login" style="width:100%; padding:10px; background-color:#007BFF; color:white; border:none; border-radius:5px; font-size:14px; cursor:pointer; font-weight: bold; transition: background 0.2s;">
+        Log In
+      </button>
+      <br>
+      <div style="margin-top:10px; font-size:12px; color:#666; text-align:center;">
+        Your HWID: <span id="hwid-display" style="font-weight: bold; color: #007BFF;">${hwid}</span>
+      </div>
+    `;
+    document.body.appendChild(ui);
+
+    let isDragging = false;
+    let offsetX = 0, offsetY = 0;
+
+    ui.addEventListener('mousedown', (e) => {
+      if (e.target.id === 'submit-login' || e.target.tagName === 'INPUT') return;
+      isDragging = true;
+      offsetX = e.clientX - ui.getBoundingClientRect().left;
+      offsetY = e.clientY - ui.getBoundingClientRect().top;
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        ui.style.left = `${e.clientX - offsetX}px`;
+        ui.style.top = `${e.clientY - offsetY}px`;
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    document.getElementById('submit-login').addEventListener('click', async () => {
+      const login = document.getElementById('login').value.trim();
+      const password = document.getElementById('password').value.trim();
+      const loginHash = await sha256Hex(login);
+      const passwordHash = await sha256Hex(password);
+
+      if (loginHash === validHashes[0] && passwordHash === validHashes[1]) {
+        enabled = true;
+        alert(`Login successful! AutoHit activated.\nYour HWID: ${hwid}`);
+        ui.remove();
+      } else {
+        alert('Invalid username or password. Please try again.');
+      }
+    });
+  }
+
+  // === AUTOINIT MAIN ===
+  const wait = setInterval(() => {
+    if (typeof game === 'undefined' || !game.drawObject || !game.me) return;
+    clearInterval(wait);
+    fetchCredentialHashes(() => {
+      hookClient();
+      addLoginInputTable();
+      checkHWIDBlocked();
+      console.log('[AutoHit-reapers] active (with HWID and SHA-256 credential hashes, remote auto-update).');
+    });
+  }, 250);
+
+  // === GAME HOOKS ===
+  function hookClient() {
+    window.addEventListener('keyup', e => {
+      if (e.key.toLowerCase() === 'h') enabled = !enabled;
+    });
+
+    const origDrawObject = game.drawObject;
+    game.drawObject = function (ent, ...rest) {
+      if (enabled) processEntity(ent);
+      return origDrawObject.call(this, ent, ...rest);
+    };
+
+    const origDraw = window.draw;
+    window.draw = function (...args) {
+      if (enabled) autoHit();
+      hitAllowed = false;
+      return origDraw.apply(this, args);
+    };
+  }
+
+  function processEntity(ent) {
+    if (!ent || ent === game.me || ent.inHide || !ent.position) return;
+    if (!TARGET_REAPERS.includes(ent.name)) return;
+
+    const scale = { x: game.zoom * game.scaleX, y: game.zoom * game.scaleY };
+    const pos = game.getRenderPosition(ent.position.x, ent.position.y);
+    const w = ent.width * scale.x, h = ent.height * scale.y;
+
+    const hit = {
+      left: pos.x - w / 2 + ent.colliderRectangleOffset.left * w,
+      right: pos.x - w / 2 + (1 - ent.colliderRectangleOffset.right) * w,
+      top: pos.y - h + ent.colliderRectangleOffset.top * h,
+      bottom: pos.y - h + (1 - ent.colliderRectangleOffset.bottom) * h,
+    };
+
+    const myName = game.me.name;
+    const scythe = SCYTHE_HITBOX[myName];
+    if (!scythe) return;
+
+    const mp = game.getRenderPosition(game.me.position.x, game.me.position.y);
+    const mw = game.me.width * scale.x, mh = game.me.height * scale.y;
+    const center = { x: mp.x + mw / 2, y: mp.y - mh / 2 };
+
+    const leftBox = {
+      left: center.x - (scythe.left * scale.x + scythe.width * scale.x),
+      right: center.x - scythe.left * scale.x,
+      top: center.y - scythe.top * scale.y,
+      bottom: center.y - scythe.top * scale.y + scythe.height * scale.y,
+    };
+    const rightBox = {
+      left: center.x + scythe.left * scale.x,
+      right: center.x + scythe.left * scale.x + scythe.width * scale.x,
+      top: leftBox.top,
+      bottom: leftBox.bottom,
+    };
+
+    if (overlap(hit, leftBox) || overlap(hit, rightBox)) hitAllowed = true;
+  }
+
+  function autoHit() {
+    if (!hitAllowed) return;
+    if (game.me.skillCooldown > 40) return;
+    if (hitAllowed) {
+      window.skillUse();
+    }
+  }
+
+  const overlap = (a, b) =>
+    !(a.left >= b.right || b.left >= a.right || a.top >= b.bottom || b.top >= a.bottom);
+})();
